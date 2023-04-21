@@ -127,7 +127,7 @@ struct Task {
 		IF_ERROR_THROW("Cannot put stop on idle end");
 	}
 
-	ITimeTrigger* AddTimeTrigger(const wstring& start) {
+	ITrigger* AddTrigger(TASK_TRIGGER_TYPE2 type, const wstring& formatString = L"Trigger{}") {
 		if (pTriggerCollection == NULL) {
 			hr = pTask->get_Triggers(&pTriggerCollection);
 			IF_ERROR_THROW("Cannot get trigger collection");
@@ -138,20 +138,26 @@ struct Task {
 		IF_ERROR_THROW("Cannot get number of triggers");
 
 		ITrigger* pTrigger = NULL;
-		hr = pTriggerCollection->Create(TASK_TRIGGER_TIME, &pTrigger);
+		hr = pTriggerCollection->Create(type, &pTrigger);
 		IF_ERROR_THROW("Cannot create trigger");
+
+		wstring ID = format(formatString, triggerCount + 1);
+		hr = pTrigger->put_Id(_bstr_t(ID.c_str()));
+		if (FAILED(hr)) {
+			pTrigger->Release();
+			ERROR_THROWF("Cannot put trigger ID ({})", LAZY_STR(ID));
+		}
+
+		return pTrigger;
+	}
+
+	ITimeTrigger* AddTimeTrigger(const wstring& start) {
+		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_TIME);
 
 		ITimeTrigger* pTimeTrigger = NULL;
 		hr = pTrigger->QueryInterface(IID_ITimeTrigger, (void**)&pTimeTrigger);
 		pTrigger->Release();
 		IF_ERROR_THROW("QueryInterface call failed for ITimeTrigger");
-
-		wstring ID = format(L"Trigger{}", triggerCount + 1);
-		hr = pTimeTrigger->put_Id(_bstr_t(ID.c_str()));
-		if (FAILED(hr)) {
-			pTimeTrigger->Release();
-			ERROR_THROWF("Cannot put trigger ID ({})", LAZY_STR(ID));
-		}
 
 		hr = pTimeTrigger->put_StartBoundary(_bstr_t(start.c_str()));
 		if (FAILED(hr)) {
@@ -323,9 +329,9 @@ public:
 		BSTR xml;
 		hr = task.pTask->get_XmlText(&xml);
 		if (FAILED(hr)) {
-			cout << "Invalid xml: " << hr << endl;
+			cout << "Invalid xml: " << hr << endl << endl;
 		} else {
-			wcout << xml << endl;
+			wcout << L"Equivalent XML output:" << endl << xml << endl << endl;
 		}
 
 #endif
@@ -712,7 +718,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 	bool result = tserv.ScheduleEvent(L'"' + wstring(fileName) + L'"', wstring(execPath), FormatTime(next_time));
 
 #ifdef _DEBUG
-	wcout << L"Set next time: " << FormatTime(next_time) << endl;
+	wcout << (result ? format(L"Scheduled next check: {}",FormatTime(next_time)) : L"Failed to schedule task.") << endl;
 	getchar();
 #endif
 	return result ? 0 : 1;
