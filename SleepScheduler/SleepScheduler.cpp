@@ -180,6 +180,29 @@ struct Task {
 		return pTimeTrigger;
 	}
 
+	ILogonTrigger* AddLogonTrigger() {
+		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_LOGON);
+
+		ILogonTrigger* pLogonTrigger = NULL;
+		hr = pTrigger->QueryInterface(IID_ILogonTrigger, (void**)&pLogonTrigger);
+		pTrigger->Release();
+		IF_ERROR_THROW("QueryInterface call failed for ILogonTrigger");
+
+		return pLogonTrigger;
+	}
+
+	ILogonTrigger* AddLogonTrigger(const wstring& userID) {
+		ILogonTrigger* pLogonTrigger = AddLogonTrigger();
+
+		pLogonTrigger->put_UserId(_bstr_t(userID.c_str()));
+		if (FAILED(hr)) {
+			pLogonTrigger->Release();
+			ERROR_THROWF("Cannot add user ID to trigger ({})", LAZY_STR(userID));
+		}
+
+		return pLogonTrigger;
+	}
+
 	IExecAction* AddExecutableAction(const wstring& execPath) {
 		if (pActionCollection == NULL) {
 			hr = pTask->get_Actions(&pActionCollection);
@@ -351,12 +374,15 @@ public:
 	}
 
 	// Time format: YYYY-MM-DDTHH:MM:SS
-	bool ScheduleEvent(const wstring& path, const wstring& folder, const wstring& time) {
+	bool ScheduleEvent(const wstring& path, const wstring& folder, const wstring& time, bool startOnLogon) {
 		try {
 			Task t = CreateTask(L"SleepSchedulerTask");
 
 			t.SetAuthor(L"SleepScheduler");
 			t.AddTimeTrigger(time)->Release();
+			if (startOnLogon) {
+				t.AddLogonTrigger()->Release();
+			}
 			t.AddExecutableAction(path, folder)->Release();
 			t.SetIdleSettings();
 			t.SetLogonType(TASK_LOGON_GROUP, TASK_RUNLEVEL_HIGHEST);
@@ -491,6 +517,7 @@ string FormatSpan(const TimeSpan& time) {
 
 vector<TimeSpan> spans[7];
 int sleepInterval = 0;
+bool onLogon = false;
 const char fileName[] = "schedule.txt";
 
 void ParseFile() {
@@ -506,6 +533,9 @@ void ParseFile() {
 	istringstream ss(line);
 
 	ss >> sleepInterval;
+
+	getline(myfile, line);
+	onLogon = line == "true" || line == "True" || line == "TRUE";
 
 	for (int i = 0; i < 7; i++) {
 		getline(myfile, line);
@@ -715,7 +745,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 	time_point next_time = local_days(next_date) + hours(next_start.hour) + minutes(next_start.minute);
 
 	TaskService tserv;
-	bool result = tserv.ScheduleEvent(L'"' + wstring(fileName) + L'"', wstring(execPath), FormatTime(next_time));
+	bool result = tserv.ScheduleEvent(L'"' + wstring(fileName) + L'"', wstring(execPath), FormatTime(next_time), onLogon);
 
 #ifdef _DEBUG
 	wcout << (result ? format(L"Scheduled next check: {}",FormatTime(next_time)) : L"Failed to schedule task.") << endl;
