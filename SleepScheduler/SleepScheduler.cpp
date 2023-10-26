@@ -1,6 +1,7 @@
 #define _WIN32_DCOM
 #define _CRT_SECURE_NO_WARNINGS
 
+#include <algorithm>
 #include <windows.h>
 #include <pathcch.h>
 #include <powrprof.h>
@@ -23,15 +24,16 @@
 
 using namespace std;
 
-#define ERROR_THROW(message) throw exception(format(message##": {:#x}",static_cast<unsigned long>(hr)).c_str())
+#define ERROR_THROW(message) throw exception(std::format(message##": {:#x}",bit_cast<unsigned long>(hr)).c_str())
 #define IF_ERROR_THROW(message) if (FAILED(hr)) ERROR_THROW(message)
 
-#define ERROR_THROWF(message, ...) throw exception(format("{}: {:#x}",format(message,__VA_ARGS__),static_cast<unsigned long>(hr)).c_str())
+#define ERROR_THROWF(message, ...) throw exception(std::format("{}: {:#x}",std::format(message,__VA_ARGS__),bit_cast<unsigned long>(hr)).c_str())
 #define IF_ERROR_THROWF(message, ...) if (FAILED(hr)) ERROR_THROWF(message,__VA_ARGS__)
 
 #define LAZY_STR(wstr) ((const char*)(wstr.c_str()))
 
-struct Task {
+struct Task
+{
 	ITaskDefinition* pTask = NULL;
 	ITaskSettings* pSettings = NULL;
 	IRegistrationInfo* pRegInfo = NULL;
@@ -42,7 +44,8 @@ struct Task {
 	wstring taskName;
 	HRESULT& hr;
 
-	Task(const wstring& _taskName, ITaskDefinition* _pTask, HRESULT& _hr) : taskName(_taskName), pTask(_pTask), hr(_hr) {
+	Task(const wstring& _taskName, ITaskDefinition* _pTask, HRESULT& _hr) : taskName(_taskName), pTask(_pTask), hr(_hr)
+	{
 		hr = pTask->get_Settings(&pSettings);
 		if (FAILED(hr))
 		{
@@ -52,7 +55,8 @@ struct Task {
 		}
 	}
 
-	~Task() {
+	~Task()
+	{
 		if (pTriggerCollection != NULL) pTriggerCollection->Release();
 		if (pActionCollection != NULL) pActionCollection->Release();
 		if (pIdleSettings != NULL) pIdleSettings->Release();
@@ -70,8 +74,10 @@ struct Task {
 		pTask = NULL;
 	}
 
-	void SetAuthor(const wstring& author) {
-		if (pRegInfo == NULL) {
+	void SetAuthor(const wstring& author)
+	{
+		if (pRegInfo == NULL)
+		{
 			hr = pTask->get_RegistrationInfo(&pRegInfo);
 			IF_ERROR_THROW("Cannot get identification pointer");
 		}
@@ -80,8 +86,10 @@ struct Task {
 		IF_ERROR_THROWF("Cannot put identification info ({})", LAZY_STR(author));
 	}
 
-	void SetLogonType(TASK_LOGON_TYPE logonType = TASK_LOGON_INTERACTIVE_TOKEN, TASK_RUNLEVEL_TYPE runLevel = TASK_RUNLEVEL_HIGHEST) {
-		if (pPrincipal == NULL) {
+	void SetLogonType(TASK_LOGON_TYPE logonType = TASK_LOGON_INTERACTIVE_TOKEN, TASK_RUNLEVEL_TYPE runLevel = TASK_RUNLEVEL_HIGHEST)
+	{
+		if (pPrincipal == NULL)
+		{
 			hr = pTask->get_Principal(&pPrincipal);
 			IF_ERROR_THROW("Cannot get principal pointer");
 		}
@@ -96,12 +104,14 @@ struct Task {
 		IF_ERROR_THROWF("Cannot set run level ({})", (int)runLevel);
 	}
 
-	void SetStartWhenAvailable(VARIANT_BOOL b = VARIANT_TRUE) {
+	void SetStartWhenAvailable(VARIANT_BOOL b = VARIANT_TRUE)
+	{
 		hr = pSettings->put_StartWhenAvailable(b);
 		IF_ERROR_THROW("Cannot set 'start when available'");
 	}
 
-	void SetStopOnBatteries(VARIANT_BOOL b = VARIANT_FALSE) {
+	void SetStopOnBatteries(VARIANT_BOOL b = VARIANT_FALSE)
+	{
 		hr = pSettings->put_DisallowStartIfOnBatteries(b);
 		IF_ERROR_THROW("Cannot set 'disallow start if on batteries'");
 
@@ -109,13 +119,16 @@ struct Task {
 		IF_ERROR_THROW("Cannot set 'stop if going on batteries'");
 	}
 
-	void SetTimeLimit(const wstring& limit = L"PT0S") {
+	void SetTimeLimit(const wstring& limit = L"PT0S")
+	{
 		hr = pSettings->put_ExecutionTimeLimit(_bstr_t(limit.c_str()));
 		IF_ERROR_THROWF("Cannot set time limit ({})", LAZY_STR(limit));
 	}
 
-	void SetIdleSettings(const wstring& timeoutSettings = L"PT5M", VARIANT_BOOL stopOnIdleEnd = VARIANT_FALSE) {
-		if (pIdleSettings == NULL) {
+	void SetIdleSettings(const wstring& timeoutSettings = L"PT5M", VARIANT_BOOL stopOnIdleEnd = VARIANT_FALSE)
+	{
+		if (pIdleSettings == NULL)
+		{
 			hr = pSettings->get_IdleSettings(&pIdleSettings);
 			IF_ERROR_THROW("Cannot get idle setting information");
 		}
@@ -127,8 +140,10 @@ struct Task {
 		IF_ERROR_THROW("Cannot put stop on idle end");
 	}
 
-	ITrigger* AddTrigger(TASK_TRIGGER_TYPE2 type, const wstring& formatString = L"Trigger{}") {
-		if (pTriggerCollection == NULL) {
+	ITrigger* AddTrigger(TASK_TRIGGER_TYPE2 type, const std::wformat_string<long> format)
+	{
+		if (pTriggerCollection == NULL)
+		{
 			hr = pTask->get_Triggers(&pTriggerCollection);
 			IF_ERROR_THROW("Cannot get trigger collection");
 		}
@@ -141,9 +156,10 @@ struct Task {
 		hr = pTriggerCollection->Create(type, &pTrigger);
 		IF_ERROR_THROW("Cannot create trigger");
 
-		wstring ID = format(formatString, triggerCount + 1);
+		wstring ID = vformat(format.get(), make_wformat_args(triggerCount + 1));
 		hr = pTrigger->put_Id(_bstr_t(ID.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pTrigger->Release();
 			ERROR_THROWF("Cannot put trigger ID ({})", LAZY_STR(ID));
 		}
@@ -151,8 +167,9 @@ struct Task {
 		return pTrigger;
 	}
 
-	ITimeTrigger* AddTimeTrigger(const wstring& start) {
-		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_TIME);
+	ITimeTrigger* AddTimeTrigger(const wstring& start)
+	{
+		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_TIME, L"Trigger{}");
 
 		ITimeTrigger* pTimeTrigger = NULL;
 		hr = pTrigger->QueryInterface(IID_ITimeTrigger, (void**)&pTimeTrigger);
@@ -160,7 +177,8 @@ struct Task {
 		IF_ERROR_THROW("QueryInterface call failed for ITimeTrigger");
 
 		hr = pTimeTrigger->put_StartBoundary(_bstr_t(start.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pTimeTrigger->Release();
 			ERROR_THROWF("Cannot add start boundary to trigger ({})", LAZY_STR(start));
 		}
@@ -168,11 +186,13 @@ struct Task {
 		return pTimeTrigger;
 	}
 
-	ITimeTrigger* AddTimeTrigger(const wstring& start, const wstring& end) {
+	ITimeTrigger* AddTimeTrigger(const wstring& start, const wstring& end)
+	{
 		ITimeTrigger* pTimeTrigger = AddTimeTrigger(start);
 
 		hr = pTimeTrigger->put_EndBoundary(_bstr_t(end.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pTimeTrigger->Release();
 			ERROR_THROWF("Cannot put end boundary on trigger ({})", LAZY_STR(end));
 		}
@@ -180,8 +200,9 @@ struct Task {
 		return pTimeTrigger;
 	}
 
-	ILogonTrigger* AddLogonTrigger() {
-		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_LOGON);
+	ILogonTrigger* AddLogonTrigger()
+	{
+		ITrigger* pTrigger = AddTrigger(TASK_TRIGGER_LOGON, L"Trigger{}");
 
 		ILogonTrigger* pLogonTrigger = NULL;
 		hr = pTrigger->QueryInterface(IID_ILogonTrigger, (void**)&pLogonTrigger);
@@ -191,11 +212,13 @@ struct Task {
 		return pLogonTrigger;
 	}
 
-	ILogonTrigger* AddLogonTrigger(const wstring& userID) {
+	ILogonTrigger* AddLogonTrigger(const wstring& userID)
+	{
 		ILogonTrigger* pLogonTrigger = AddLogonTrigger();
 
 		pLogonTrigger->put_UserId(_bstr_t(userID.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pLogonTrigger->Release();
 			ERROR_THROWF("Cannot add user ID to trigger ({})", LAZY_STR(userID));
 		}
@@ -203,8 +226,10 @@ struct Task {
 		return pLogonTrigger;
 	}
 
-	IExecAction* AddExecutableAction(const wstring& execPath) {
-		if (pActionCollection == NULL) {
+	IExecAction* AddExecutableAction(const wstring& execPath)
+	{
+		if (pActionCollection == NULL)
+		{
 			hr = pTask->get_Actions(&pActionCollection);
 			IF_ERROR_THROW("Cannot get Task collection pointer");
 		}
@@ -219,7 +244,8 @@ struct Task {
 		IF_ERROR_THROW("QueryInterface call failed for IExecAction");
 
 		hr = pExecAction->put_Path(_bstr_t(execPath.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pExecAction->Release();
 			ERROR_THROWF("Cannot put action path ({})", LAZY_STR(execPath));
 		}
@@ -227,11 +253,13 @@ struct Task {
 		return pExecAction;
 	}
 
-	IExecAction* AddExecutableAction(const wstring& execPath, const wstring& folderPath) {
+	IExecAction* AddExecutableAction(const wstring& execPath, const wstring& folderPath)
+	{
 		IExecAction* pExecAction = AddExecutableAction(execPath);
 
 		hr = pExecAction->put_WorkingDirectory(_bstr_t(folderPath.c_str()));
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			pExecAction->Release();
 			ERROR_THROWF("Cannot put action working directory ({})", LAZY_STR(folderPath));
 		}
@@ -240,7 +268,8 @@ struct Task {
 	}
 };
 
-wstring HResultToString(HRESULT hr) {
+wstring HResultToString(HRESULT hr)
+{
 	DWORD errorMessageID = hr == S_OK ? ERROR_SUCCESS : ((hr & 0xFFFF0000) == MAKE_HRESULT(SEVERITY_ERROR, FACILITY_WIN32, 0) ? HRESULT_CODE(hr) : ERROR_CAN_NOT_COMPLETE);
 
 	LPWSTR messageBuffer = nullptr;
@@ -255,7 +284,8 @@ wstring HResultToString(HRESULT hr) {
 	return message;
 }
 
-class TaskService {
+class TaskService
+{
 private:
 	bool _initialised = false;
 	HRESULT hr;
@@ -263,7 +293,8 @@ private:
 	ITaskFolder* pRootFolder = NULL;
 
 public:
-	TaskService() {
+	TaskService()
+	{
 		if (_initialised) return;
 
 		hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -320,7 +351,8 @@ public:
 		_initialised = true;
 	}
 
-	~TaskService() {
+	~TaskService()
+	{
 		if (pRootFolder != NULL) pRootFolder->Release();
 		if (pService != NULL) pService->Release();
 		if(_initialised) CoUninitialize();
@@ -330,13 +362,16 @@ public:
 		_initialised = false;
 	}
 
-	bool IsStarted() {
+	bool IsStarted()
+	{
 		return _initialised;
 	}
 
-	Task CreateTask(const wstring& taskName) {
+	Task CreateTask(const wstring& taskName)
+	{
 		hr = pRootFolder->DeleteTask(_bstr_t(taskName.c_str()), 0);
-		if (FAILED(hr)  && !(HRESULT_FACILITY(hr) == FACILITY_WIN32 && HRESULT_CODE(hr) == ERROR_FILE_NOT_FOUND)) {
+		if (FAILED(hr)  && !(HRESULT_FACILITY(hr) == FACILITY_WIN32 && HRESULT_CODE(hr) == ERROR_FILE_NOT_FOUND))
+		{
 			ERROR_THROW("Could not delete task");
 		}
 
@@ -347,13 +382,17 @@ public:
 		return Task(taskName, pTask, hr);
 	}
 
-	void SaveTask(Task& task) {
+	void SaveTask(Task& task)
+	{
 #ifdef _DEBUG
 		BSTR xml;
 		hr = task.pTask->get_XmlText(&xml);
-		if (FAILED(hr)) {
+		if (FAILED(hr))
+		{
 			cout << "Invalid xml: " << hr << endl << endl;
-		} else {
+		}
+		else
+		{
 			wcout << L"Equivalent XML output:" << endl << xml << endl << endl;
 		}
 
@@ -374,15 +413,20 @@ public:
 	}
 
 	// Time format: YYYY-MM-DDTHH:MM:SS
-	bool ScheduleEvent(const wstring& path, const wstring& folder, const wstring& time, bool startOnLogon) {
-		try {
+	bool ScheduleEvent(const wstring& path, const wstring& folder, const wstring& time, bool startOnLogon)
+	{
+		try
+		{
 			Task t = CreateTask(L"SleepSchedulerTask");
 
 			t.SetAuthor(L"SleepScheduler");
 			t.AddTimeTrigger(time)->Release();
-			if (startOnLogon) {
+
+			if (startOnLogon)
+			{
 				t.AddLogonTrigger()->Release();
 			}
+
 			t.AddExecutableAction(path, folder)->Release();
 			t.SetIdleSettings();
 			t.SetLogonType(TASK_LOGON_GROUP, TASK_RUNLEVEL_HIGHEST);
@@ -393,7 +437,9 @@ public:
 			SaveTask(t);
 
 			return true;
-		} catch(std::exception& ex) {
+		}
+		catch(std::exception& ex)
+		{
 			cout << ex.what() << endl;
 			wcout << HResultToString(hr) << endl;
 			return false;
@@ -401,14 +447,16 @@ public:
 	}
 };
 
-void AddDays(chrono::year_month_day& date, unsigned nDays) {
+void AddDays(chrono::year_month_day& date, unsigned nDays)
+{
 	using namespace std::chrono;
 	date = year_month_day(sys_days{ date } + days{ nDays });
 }
 
 
 template <class T, class D>
-void AddDays(chrono::time_point<T,D>& time, unsigned nDays) {
+void AddDays(chrono::time_point<T,D>& time, unsigned nDays)
+{
 	using namespace std::chrono;
 	year_month_day ymd{ floor<days>(time) };
 	hh_mm_ss hms{ time - floor<days>(time) };
@@ -417,49 +465,76 @@ void AddDays(chrono::time_point<T,D>& time, unsigned nDays) {
 }
 
 template <class T, class D>
-wstring FormatTime(const chrono::time_point<T,D>& time) {
-	using namespace std::chrono;
+wstring FormatTime(const chrono::time_point<T,D>& time)
+{
+	using std::chrono::year_month_day, std::chrono::days, std::chrono::minutes, std::chrono::hh_mm_ss;
 	year_month_day ymd{ floor<days>(time) };
 	hh_mm_ss hms{ floor<minutes>(time) - floor<days>(time) };
 	return format(L"{0:%Y}-{0:%m}-{0:%d}T{1:%H}:{1:%M}:{1:%S}", ymd, hms);
 }
 
-struct DoubleTime {
+struct DoubleTime
+{
 	int hour = 0;
 	int minute = 0;
 
-	DoubleTime() : hour(0), minute(0) {}
-	DoubleTime(int _hour, int _minute) : hour(_hour), minute(_minute) {}
+	constexpr DoubleTime() : hour(0), minute(0) {}
+	constexpr DoubleTime(int _hour, int _minute) : hour(_hour), minute(_minute) {}
 
-	DoubleTime operator+ (const DoubleTime& t) const {
+	constexpr DoubleTime operator+ (const DoubleTime& t) const
+	{
 		return DoubleTime(hour + t.hour + (minute + t.minute) / 60, (minute + t.minute) % 60);
 	}
-	DoubleTime& operator+= (const DoubleTime& t)  {
+	DoubleTime& operator+= (const DoubleTime& t) 
+	{
 		hour += t.hour;
 		minute += t.minute;
 		hour += minute / 60;
 		minute %= 60;
 		return *this;
 	}
+	constexpr DoubleTime operator- (const DoubleTime& t) const
+	{
+		return DoubleTime(hour - t.hour - (59 - (minute - t.minute)) / 60, (60 + (minute - t.minute)) % 60);
+	}
+	DoubleTime& operator-= (const DoubleTime& t)
+	{
+		hour -= t.hour;
+		minute -= t.minute;
+		hour -= (59 - minute) / 60;
+		minute = (60 + minute) % 60;
+		return *this;
+	}
 
-	bool operator== (const DoubleTime& t) const {
+	constexpr bool operator== (const DoubleTime& t) const
+	{
 		return hour == t.hour && minute == t.minute;
 	}
-	bool operator> (const DoubleTime& t) const {
+	constexpr bool operator> (const DoubleTime& t) const
+	{
 		return hour > t.hour || hour == t.hour && minute > t.minute;
 	}
-	bool operator>= (const DoubleTime& t) const {
+	constexpr bool operator>= (const DoubleTime& t) const
+	{
 		return hour > t.hour || hour == t.hour && minute >= t.minute;
 	}
-	bool operator< (const DoubleTime& t) const {
+	constexpr bool operator< (const DoubleTime& t) const
+	{
 		return hour < t.hour || hour == t.hour && minute < t.minute;
 	}
-	bool operator<= (const DoubleTime& t) const {
+	constexpr bool operator<= (const DoubleTime& t) const
+	{
 		return hour < t.hour || hour == t.hour && minute <= t.minute;
 	}
 
-	string to_string() const {
+	string to_string() const
+	{
 		return format("{:02}:{:02}", hour, minute);
+	}
+
+	constexpr unsigned int to_minutes() const
+	{
+		return hour * 60 + minute;
 	}
 
 	static const DoubleTime one_day;
@@ -472,59 +547,77 @@ const DoubleTime DoubleTime::one_hour = DoubleTime(1, 0);
 const DoubleTime DoubleTime::one_minute = DoubleTime(0, 1);
 const DoubleTime DoubleTime::zero = DoubleTime(0, 0);
 
-struct TimeSpan {
+struct TimeSpan
+{
 	DoubleTime start;
 	DoubleTime end;
 
-	bool overlapping(const TimeSpan& t) const {
+	bool overlapping(const TimeSpan& t) const
+	{
 		if (t < *this) return t.overlapping(*this);
 		return end.hour > t.start.hour || end.hour == t.start.hour && end.minute + 1 >= t.start.minute;
 	}
 
-	bool operator== (const TimeSpan& t) const {
+	bool operator== (const TimeSpan& t) const
+	{
 		return start == t.start;
 	}
-	bool operator> (const TimeSpan& t) const {
+	bool operator> (const TimeSpan& t) const
+	{
 		return start > t.start;
 	}
-	bool operator< (const TimeSpan& t) const {
+	bool operator< (const TimeSpan& t) const
+	{
 		return start < t.start;
 	}
 
-	bool contains(const DoubleTime& time) const {
+	bool contains(const DoubleTime& time) const
+	{
 		return time >= start && time <= end;
 	}
 	
 	template<class T>
-	bool contains(const chrono::hh_mm_ss<T>& time) const {
+	bool contains(const chrono::hh_mm_ss<T>& time) const
+	{
 		DoubleTime t( time.hours().count(), time.minutes().count() );
 		return contains(t);
 	}
 
-	string to_string() const {
+	string to_string() const
+	{
 		return format("{}-{}", start.to_string(), end.to_string());
+	}
+
+	DoubleTime length() const
+	{
+		return end - start;
 	}
 };
 
 template<class T>
-string FormatSpan(const TimeSpan& time, const chrono::hh_mm_ss<T>& now) {
+string FormatSpan(const TimeSpan& time, const chrono::hh_mm_ss<T>& now)
+{
 	return format("{:02}:{:02}-{:02}:{:02}{:} ", time.start.hour, time.start.minute, time.end.hour, time.end.minute, time.contains(now) ? " (!!!)" : "");
 }
 
-string FormatSpan(const TimeSpan& time) {
+string FormatSpan(const TimeSpan& time)
+{
 	return format("{:02}:{:02}-{:02}:{:02} ", time.start.hour, time.start.minute, time.end.hour, time.end.minute);
 }
 
 vector<TimeSpan> spans[7];
 int sleepInterval = 0;
+DoubleTime totalSleepTime;
 bool onLogon = false;
 const char fileName[] = "schedule.txt";
 
-void ParseFile() {
+void ParseFile()
+{
 	ifstream myfile(fileName);
 	if (!myfile.is_open()) throw exception("Cannot open schedule file.");
 
-	for (int i = 0; i < 7; i++) {
+	for (int i = 0; i < 7; i++)
+	{
 		spans[i] = vector<TimeSpan>();
 	}
 
@@ -537,16 +630,19 @@ void ParseFile() {
 	getline(myfile, line);
 	onLogon = line == "true" || line == "True" || line == "TRUE";
 
-	for (int i = 0; i < 7; i++) {
+	for (int i = 0; i < 7; i++)
+	{
 		getline(myfile, line);
 		ss = istringstream(line);
 
-		if (ss.get() != '[') {
+		if (ss.get() != '[')
+		{
 			throw exception(format("Schedule file improperly formatted (Line {}) (No opening bracket).", i + 1).c_str());
 		}
 		if (ss.peek() == ']') continue;
 
-		do {
+		do
+		{
 			TimeSpan ts;
 			ss >> ts.start.hour;
 			if (ss.get() != ':') throw exception(format("Schedule file improperly formatted (Line {}) (Time formatted incorrectly).", i + 1).c_str());
@@ -566,13 +662,15 @@ void ParseFile() {
 
 			while (ts.end < ts.start) ts.end.hour += 24;
 
-			while (ts.start.hour >= 24) {
+			while (ts.start.hour >= 24)
+			{
 				_i = (_i + 1) % 7;
 				ts.start.hour -= 24;
 				ts.end.hour -= 24;
 			}
 
-			while (ts.end.hour >= 24) {
+			while (ts.end.hour >= 24)
+			{
 				spans[_i].push_back(TimeSpan(ts.start, DoubleTime(23, 59)));
 				_i = (_i + 1) % 7;
 
@@ -581,7 +679,8 @@ void ParseFile() {
 			}
 
 			spans[_i].push_back(ts);
-		} while (ss.get() == ',');
+		}
+		while (ss.get() == ',');
 
 		ss.unget();
 
@@ -590,8 +689,10 @@ void ParseFile() {
 
 #ifdef _DEBUG
 	cout << "Schedule before merge: " << endl;
-	for (int i = 0; i < 7; i++) {
-		for (int j = 0; j < spans[i].size(); j++) {
+	for (int i = 0; i < 7; i++)
+	{
+		for (int j = 0; j < spans[i].size(); j++)
+		{
 			auto k = spans[i][j];
 			cout << FormatSpan(k);
 		}
@@ -600,13 +701,16 @@ void ParseFile() {
 	cout << endl;
 #endif
 
-	for (int i = 0; i < 7; i++) {
+	for (int i = 0; i < 7; i++)
+	{
 		sort(spans[i].begin(), spans[i].end());
 
-		for (size_t j = 0; j < spans[i].size() - 1;) {
+		for (size_t j = 0; j < spans[i].size() - 1;)
+		{
 			TimeSpan& a = spans[i][j];
 			const TimeSpan& b = spans[i][j + 1];
-			if (a.overlapping(b)) {
+			if (a.overlapping(b))
+			{
 				a.start = min(a.start, b.start);
 				a.end = max(a.end, b.end);
 				spans[i].erase(spans[i].begin() + j + 1);
@@ -614,14 +718,33 @@ void ParseFile() {
 			else j++;
 		}
 	}
+
+	totalSleepTime = { 0, 0 };
+
+	for (int i = 0; i < 7; i++)
+	{
+		for (size_t j = spans[i].size(); j--;)
+		{
+			totalSleepTime += spans[i][j].length() + DoubleTime::one_minute;
+		}
+	}
+
+	const int maxSleepTime = (7 * 24 - 1) * 60; // All week, except for one hour
+
+	if (totalSleepTime.to_minutes() > maxSleepTime)
+	{
+		throw exception(format("Schedule file sleeps for too long! ({} day(s), {} hour(s), {} minute(s)).", totalSleepTime.hour / 24, totalSleepTime.hour % 24, totalSleepTime.minute).c_str());
+	}
 }
 
-void SetPrivilege(const wstring& privilege, bool enable) {
+void SetPrivilege(const wstring& privilege, bool enable)
+{
 	HANDLE hToken;
 	OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken);
 
 	TOKEN_PRIVILEGES tp;
-	if (!LookupPrivilegeValue(NULL, privilege.c_str(), &tp.Privileges[0].Luid)) {
+	if (!LookupPrivilegeValue(NULL, privilege.c_str(), &tp.Privileges[0].Luid))
+	{
 		throw exception(format("LookupPrivilegeValue error: {}", GetLastError()).c_str());
 	}
 
@@ -635,11 +758,13 @@ void SetPrivilege(const wstring& privilege, bool enable) {
 		sizeof(TOKEN_PRIVILEGES),
 		(PTOKEN_PRIVILEGES)NULL,
 		(PDWORD)NULL
-	)) {
+	))
+	{
 		throw exception(format("AdjustTokenPrivileges error: {}", GetLastError()).c_str());
 	}
 
-	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED) {
+	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
+	{
 		throw exception("The token does not have the specified privilege.");
 	}
 }
@@ -655,7 +780,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 	wchar_t fileName[256];
 	wchar_t execPath[256];
 
-	if (GetModuleFileName(NULL, fileName, sizeof(fileName) / sizeof(wchar_t)) == 0) {
+	if (GetModuleFileName(NULL, fileName, sizeof(fileName) / sizeof(wchar_t)) == 0)
+	{
 		cout << "Cannot get application path." << endl;
 		return 1;
 	}
@@ -663,16 +789,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 	memcpy(execPath, fileName, sizeof(fileName));
 	PathCchRemoveFileSpec(execPath, sizeof(fileName) / sizeof(wchar_t));
 
-	try {
+	try
+	{
 		SetPrivilege(SE_SHUTDOWN_NAME, true);
 	}
-	catch (const std::exception& e) {
+	catch (const std::exception& e)
+	{
 		cout << "Cannot gain shutdown permission:" << endl;
 		cout << e.what() << endl;
 		return 1;
 	}
 
-	ParseFile();
+	try
+	{
+		ParseFile();
+	}	
+	catch (const std::exception& e)
+	{
+		cout << "Error parsing file:" << endl;
+		cout << e.what() << endl;
+		return 1;
+	}
 
 	int tswd = -1;
 	TimeSpan* ts = NULL;
@@ -682,8 +819,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 
 #ifdef _DEBUG
 	cout << "Schedule after merge: " << endl;
-	for (int i = 0; i < 7; i++) {
-		for (int j = 0; j < spans[i].size(); j++) {
+	for (int i = 0; i < 7; i++)
+	{
+		for (int j = 0; j < spans[i].size(); j++)
+		{
 			cout << FormatSpan(spans[i][j], t);
 		}
 		cout << endl;
@@ -691,23 +830,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 	cout << endl;
 #endif
 
-	do {
+	do
+	{
 		tp = zoned_time{ current_zone(), system_clock::now() }.get_local_time();
 		// Sun - Sat, 0-6
 		wd = weekday{ floor<days>(tp) }.c_encoding();
 		t = hh_mm_ss{ floor<minutes>(tp) - floor<days>(tp) };
-		
-		if (ts == NULL || wd != tswd || !ts->contains(t)) {
+
+		if (ts == NULL || wd != tswd || !ts->contains(t))
+		{
 			ts = NULL;
-			for (size_t i = 0; i < spans[wd].size(); i++) {
-				if (spans[wd][i].contains(t)) {
+			for (size_t i = 0; i < spans[wd].size(); i++)
+			{
+				if (spans[wd][i].contains(t))
+				{
 					ts = &(spans[wd][i]);
 					tswd = wd;
 					break;
 				}
 			}
 		}
-		else {
+		else
+		{
 #ifdef _DEBUG
 			cout << "Sleep" << endl;
 			getchar();
@@ -716,22 +860,26 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR pCmdLine,
 			Sleep(sleepInterval);
 #endif
 		}
-	} while (ts != NULL);
+	}
+	while (ts != NULL);
 
 	bool set = false;
 	year_month_day next_date = year_month_day(floor<days>(tp));
 	DoubleTime next_start;
 
 	DoubleTime t2{ t.hours().count(), t.minutes().count() };
-	for (size_t j = 0; j < spans[wd].size(); j++) {
+	for (size_t j = 0; j < spans[wd].size(); j++)
+	{
 		if (spans[wd][j].start < t2) continue;
 		next_start = spans[wd][j].start;
 		set = true;
 		break;
 	}
 
-	if (!set) {
-		for (int i = 1; i < 7; i++) {
+	if (!set)
+	{
+		for (int i = 1; i < 7; i++)
+		{
 			if (spans[(wd + i) % 7].empty()) continue;
 			AddDays(next_date, i);
 			next_start = spans[wd][0].start;

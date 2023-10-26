@@ -23,5 +23,6 @@
     <CopyFileToFolders Include="Schedule.txt">
       <Filter>Source Files</Filter>
     </CopyFileToFolders>
+    <CopyFileToFolders Include="Readme.txt" />
   </ItemGroup>
 </Project>
